@@ -12,3 +12,7 @@ services:
         sync: false
       - key: PORT
         value: 10000
+      - key: CHANNEL_ID
+        value: "@luxe_client"
+      - key: CHANNEL_URL
+        value: https://t.me/luxe_client

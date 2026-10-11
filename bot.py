@@ -28,6 +28,10 @@ ADMIN_IDS = {
 # Render и другие хостинги дают порт в переменной PORT
 PORT = int(os.getenv("PORT", "10000"))
 
+# Канал для обязательной подписки
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@luxe_client")
+CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/luxe_client")
+
 BASE_DIR = Path(__file__).parent
 FILES_DIR = BASE_DIR / "files"
 DB_PATH = BASE_DIR / "files.json"
@@ -59,6 +63,39 @@ def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
+async def is_subscribed(bot: Bot, user_id: int) -> bool:
+    if is_admin(user_id):
+        return True
+    try:
+        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        status = getattr(member, "status", "")
+        if status in ("member", "administrator", "creator"):
+            return True
+        # restricted, но все еще участник
+        if status == "restricted" and bool(getattr(member, "is_member", False)):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def sub_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Подписаться на канал", url=CHANNEL_URL)],
+        [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")],
+    ])
+
+
+async def require_sub(message: Message, bot: Bot) -> bool:
+    if await is_subscribed(bot, message.from_user.id):
+        return True
+    await message.answer(
+        "Бот доступен только подписчикам канала.\nПодпишись и нажми «Проверить подписку».",
+        reply_markup=sub_keyboard(),
+    )
+    return False
+
+
 def files_keyboard(catalog: list[dict], prefix: str = "get") -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text=item["name"][:64], callback_data=f"{prefix}:{item['id']}")]
@@ -68,7 +105,9 @@ def files_keyboard(catalog: list[dict], prefix: str = "get") -> InlineKeyboardMa
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, bot: Bot):
+    if not await require_sub(message, bot):
+        return
     catalog = load_catalog()
     if not catalog:
         await message.answer(
@@ -83,7 +122,9 @@ async def cmd_start(message: Message):
 
 
 @router.message(Command("list"))
-async def cmd_list(message: Message):
+async def cmd_list(message: Message, bot: Bot):
+    if not await require_sub(message, bot):
+        return
     catalog = load_catalog()
     if not catalog:
         await message.answer("Каталог пуст.")
@@ -94,8 +135,31 @@ async def cmd_list(message: Message):
     )
 
 
+@router.callback_query(F.data == "check_sub")
+async def cb_check_sub(callback: CallbackQuery, bot: Bot):
+    if await is_subscribed(bot, callback.from_user.id):
+        await callback.answer("Подписка подтверждена!")
+        catalog = load_catalog()
+        if not catalog:
+            await callback.message.answer("Подписка есть. Пока файлов нет.")
+            return
+        await callback.message.answer(
+            "Подписка есть! Выбери файл:",
+            reply_markup=files_keyboard(catalog),
+        )
+    else:
+        await callback.answer("Ты еще не подписан на канал", show_alert=True)
+
+
 @router.callback_query(F.data.startswith("get:"))
-async def cb_get_file(callback: CallbackQuery):
+async def cb_get_file(callback: CallbackQuery, bot: Bot):
+    if not await is_subscribed(bot, callback.from_user.id):
+        await callback.answer("Сначала подпишись на канал", show_alert=True)
+        await callback.message.answer(
+            "Бот доступен только подписчикам канала.",
+            reply_markup=sub_keyboard(),
+        )
+        return
     file_id = callback.data.split(":", 1)[1]
     catalog = load_catalog()
     item = next((x for x in catalog if x["id"] == file_id), None)
