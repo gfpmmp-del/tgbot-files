@@ -366,26 +366,26 @@ async def cmd_add(message: Message):
 
 @router.message(Command("add_shop"))
 async def cmd_add_shop(message: Message, state: FSMContext):
-    await start_add(message, state, "shop")
+    await start_add(message, state, "shop", message.from_user.id)
 
 
 @router.message(Command("add_service"))
 async def cmd_add_service(message: Message, state: FSMContext):
-    await start_add(message, state, "services")
+    await start_add(message, state, "services", message.from_user.id)
 
 
 @router.message(Command("add_file"))
 async def cmd_add_file(message: Message, state: FSMContext):
-    await start_add(message, state, "files")
+    await start_add(message, state, "files", message.from_user.id)
 
 
-async def start_add(message: Message, state: FSMContext, section: str):
-    if not is_admin(message.from_user.id):
-        await message.answer("Только админ может добавлять.")
+async def start_add(target: Message, state: FSMContext, section: str, user_id: int):
+    if not is_admin(user_id):
+        await target.answer("Только админ может добавлять.")
         return
     await state.update_data(section=section)
     await state.set_state(AddItem.waiting_file)
-    await message.answer(
+    await target.answer(
         f"Раздел: {SECTIONS[section]}.\nПришли файл (фото/видео/документ)."
     )
 
@@ -395,7 +395,7 @@ async def cb_addsec(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("Нет прав", show_alert=True)
         return
-    await start_add(callback.message, state, callback.data.split(":", 1)[1])
+    await start_add(callback.message, state, callback.data.split(":", 1)[1], callback.from_user.id)
     await callback.answer()
 
 
